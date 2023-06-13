@@ -1,8 +1,8 @@
-name: Deploy MultiDockerAWSGhActions
+name: Deploy MultiDocker on AWS
 on:
   push:
     branches:
-      - main # check your repo, your default branch might be master!
+      - aws # check your repo, your default branch might be master!
 
 jobs:
   build:
