@@ -20,6 +20,7 @@ const pgClient = new Pool({
 });
 
 pgClient.on("connect", (client) => {
+  console.log('server > db connected')
   client
     .query("CREATE TABLE IF NOT EXISTS values (number INT)")
     .catch((err) => console.error(err));
@@ -35,23 +36,22 @@ const redisClient = redis.createClient({
 const redisPublisher = redisClient.duplicate();
 
 // Express route handlers
-
 app.get("/", (req, res) => {
   res.send("Hi");
 });
-
+//  all prev indexes -> seenIndexes
 app.get("/values/all", async (req, res) => {
   const values = await pgClient.query("SELECT * from values");
 
   res.send(values.rows);
 });
-
+// 
 app.get("/values/current", async (req, res) => {
   redisClient.hgetall("values", (err, values) => {
     res.send(values);
   });
 });
-
+// calculate value
 app.post("/values", async (req, res) => {
   const index = req.body.index;
 
@@ -60,7 +60,9 @@ app.post("/values", async (req, res) => {
   }
 
   redisClient.hset("values", index, "Nothing yet!");
+  // pub-sub
   redisPublisher.publish("insert", index);
+  // add index to db
   pgClient.query("INSERT INTO values(number) VALUES($1)", [index]);
 
   res.send({ working: true });
