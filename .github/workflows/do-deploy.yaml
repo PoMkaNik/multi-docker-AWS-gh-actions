@@ -11,7 +11,7 @@ env:
   PGDATABASE: ${{ secrets.PGDATABASE }}
   PGPASSWORD: ${{ secrets.PGPASSWORD }}
   PGPORT: ${{ secrets.PGPORT }}
-  
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,44 +22,38 @@ jobs:
         uses: digitalocean/action-doctl@v2
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-      - name: Generate unique string
-        id: unique-string
-        run: |
-          unique_string="my-droplet-$(echo ${{ github.run_id }} | md5sum | cut -c1-8)"
-          echo "$unique_string"
-          echo "::set-output name=UNIQUE_STRING::$unique_string"
-      - name: Use unique string
-        run: |
-          # Use the unique string generated in the previous step
-          echo "${{ env.UNIQUE_STRING }}"
       - name: Create new droplet
         id: droplet
         run: |
-          doctl compute droplet create ${{ env.UNIQUE_STRING }} \
+          dropletId=$(doctl compute droplet create my-droplet-${{ github.run_id }} \
           --region nyc1 \
           --size s-1vcpu-1gb \
           --image ubuntu-18-04-x64 \
           --ssh-keys  ${{ secrets.DO_SSH_KEY_ID }} \
-          --no-header
+          --format 'ID' \
+          --no-header)
+          echo "DROPLET_ID=$dropletId" >> $GITHUB_ENV
       - name: Wait for 60 seconds
         run: sleep 60
       - name: Get created droplet IPv4
         run: |
-          ipv4=$(doctl compute droplet get ${{ env.UNIQUE_STRING }} --output json | jq -r '.Networks.V4[]?.IpAddress')
-          echo "::set-env name=DROPLET_IPV4::$ipv4"
+          ipv4=$(doctl compute droplet get ${{ env.DROPLET_ID }} --format 'PublicIPv4' --output text --no-header)
+          echo "DROPLET_IPV4=$ipv4" >> $GITHUB_ENV
+      - name: Wait for 30 seconds
+        run: sleep 30
       - name: Install Docker on droplet
-        uses: appleboy/ssh-action@v0.0.2
+        uses: appleboy/ssh-action@v0.1.10
         with:
-          host: ${{ env.DROPLET_IPV4 }}
+          host: '${{ env.DROPLET_IPV4 }}'
           username: root
           key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
           script: |
-            sudo apt-get update
+            sudo apt-get update &&
             sudo apt-get install -y docker-compose
       - name: Set environment variables
-        uses: appleboy/ssh-action@v0.0.2
+        uses: appleboy/ssh-action@v0.1.10
         with:
-          host: ${{ env.DROPLET_IPV4 }}
+          host: '${{ env.DROPLET_IPV4 }}'
           username: root
           key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
           script: |
@@ -71,25 +65,25 @@ jobs:
             echo "PGPASSWORD=${{ secrets.PGPASSWORD }}" >> /etc/environment
             echo "PGPORT=${{ secrets.PGPORT }}" >> /etc/environment
       - name: Make dir for docker-compose config file
-        uses: appleboy/ssh-action@v0.0.2
+        uses: appleboy/ssh-action@v0.1.10
         with:
-          host: ${{ env.DROPLET_IPV4 }}
+          host: '${{ env.DROPLET_IPV4 }}'
           username: root
           key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
           script: |
             sudo mkdir -p /var/docker
-      - name: Copy docker-compose config file to droplet      
-        uses: appleboy/scp-action@master      
-        with:        
-          host: ${{ env.DROPLET_IPV4 }}
-          username: root
-          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}  
-          source: docker-compose.yml        
-          target: /var/docker   
-      - name: Deploy Docker Compose config
-        uses: appleboy/ssh-action@v0.0.2
+      - name: Copy docker-compose config file to droplet
+        uses: appleboy/scp-action@master
         with:
           host: ${{ env.DROPLET_IPV4 }}
+          username: root
+          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          source: .
+          target: /var/docker
+      - name: Deploy Docker Compose config
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: '${{ env.DROPLET_IPV4 }}'
           username: root
           key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
           script: |
