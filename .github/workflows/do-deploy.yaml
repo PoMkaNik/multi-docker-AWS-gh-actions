@@ -1,0 +1,95 @@
+name: Deploy MultiDocker on DigitalOcean
+on:
+  push:
+    branches:
+      - digitalocean # check your repo, your default branch might be master!
+env:
+  REDIS_HOST: ${{ secrets.REDIS_HOST }}
+  REDIS_PORT: ${{ secrets.REDIS_PORT }}
+  PGUSER: ${{ secrets.PGUSER }}
+  PGHOST: ${{ secrets.PGHOST }}
+  PGDATABASE: ${{ secrets.PGDATABASE }}
+  PGPASSWORD: ${{ secrets.PGPASSWORD }}
+  PGPORT: ${{ secrets.PGPORT }}
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Set up the DigitalOcean CLI
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Generate unique string
+        id: unique-string
+        run: echo "my-string-$(echo ${{ github.run_id }} | md5sum | cut -c1-8)"
+      - name: Use unique string
+        run: |
+          # Use the unique string generated in the previous step
+          echo "${{ steps.unique-string.outputs.self }}"
+      - name: Create new droplet
+        id: droplet
+        run: |
+          doctl compute droplet create ${{ steps.unique-string.outputs.self }} \
+          --region nyc1 \
+          --size s-1vcpu-1gb \
+          --image ubuntu-18-04-x64 \
+          --ssh-keys  ${{ secrets.DO_SSH_KEY_ID }} \
+          --no-header
+      - name: Wait for 60 seconds
+        run: sleep 60
+      - name: Get created droplet IPv4
+        run: |
+          ipv4=$(doctl compute droplet get ${{ steps.unique-string.outputs.self }} --output json | jq -r '.Networks.V4[]?.IpAddress')
+          echo "::set-env name=DROPLET_IPV4::$ipv4"
+      - name: Install Docker on droplet
+        uses: appleboy/ssh-action@v0.0.2
+        with:
+          host: ${{ env.DROPLET_IPV4 }}
+          username: root
+          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          script: |
+            sudo apt-get update
+            sudo apt-get install -y docker-compose
+      - name: Set environment variables
+        uses: appleboy/ssh-action@v0.0.2
+        with:
+          host: ${{ env.DROPLET_IPV4 }}
+          username: root
+          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          script: |
+            echo "REDIS_HOST=${{ secrets.REDIS_HOST }}" >> /etc/environment
+            echo "REDIS_PORT=${{ secrets.REDIS_PORT }}" >> /etc/environment
+            echo "PGUSER=${{ secrets.PGUSER }}" >> /etc/environment
+            echo "PGHOST=${{ secrets.PGHOST }}" >> /etc/environment
+            echo "PGDATABASE=${{ secrets.PGDATABASE }}" >> /etc/environment
+            echo "PGPASSWORD=${{ secrets.PGPASSWORD }}" >> /etc/environment
+            echo "PGPORT=${{ secrets.PGPORT }}" >> /etc/environment
+      - name: Make dir for docker-compose config file
+        uses: appleboy/ssh-action@v0.0.2
+        with:
+          host: ${{ env.DROPLET_IPV4 }}
+          username: root
+          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          script: |
+            sudo mkdir -p /var/docker
+      - name: Copy docker-compose config file to droplet      
+        uses: appleboy/scp-action@master      
+        with:        
+          host: ${{ env.DROPLET_IPV4 }}
+          username: root
+          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}  
+          source: docker-compose.yml        
+          target: /var/docker   
+      - name: Deploy Docker Compose config
+        uses: appleboy/ssh-action@v0.0.2
+        with:
+          host: ${{ env.DROPLET_IPV4 }}
+          username: root
+          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          script: |
+            cd /var/docker/
+            docker-compose build
+            docker-compose up -d

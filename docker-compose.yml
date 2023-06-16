@@ -1,12 +1,26 @@
 version: '3'
 services:
+  postgres:
+    image: 'postgres:latest'
+    environment:
+      - POSTGRES_PASSWORD=$PGPASSWORD
+  redis:
+    image: 'redis:latest'
   client:
-    image: 'romandubovik/multi-docker-client'
-    mem_limit: 128m
     hostname: client
-  server:
-    image: 'romandubovik/multi-docker-server'
-    mem_limit: 128m
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./client
+    volumes:
+      - /app/node_modules
+      - ./client:/app
+  api:
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./server
+    volumes:
+      - /app/node_modules
+      - ./server:/app
     hostname: api
     environment:
       - REDIS_HOST=$REDIS_HOST
@@ -17,15 +31,23 @@ services:
       - PGPASSWORD=$PGPASSWORD
       - PGPORT=$PGPORT
   worker:
-    image: 'romandubovik/multi-docker-worker'
-    mem_limit: 128m
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./worker
+    volumes:
+      - /app/node_modules
+      - ./worker:/app
     hostname: worker
     environment:
       - REDIS_HOST=$REDIS_HOST
       - REDIS_PORT=$REDIS_PORT
   nginx:
-    image: 'romandubovik/multi-docker-nginx'
-    mem_limit: 128m
-    hostname: nginx
+    depends_on:
+      - api
+      - client
+    restart: always
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./nginx
     ports:
       - '80:80'
