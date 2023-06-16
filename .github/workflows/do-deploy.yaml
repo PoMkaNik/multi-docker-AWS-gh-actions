@@ -24,15 +24,18 @@ jobs:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Generate unique string
         id: unique-string
-        run: echo "my-string-$(echo ${{ github.run_id }} | md5sum | cut -c1-8)"
+        run: |
+          unique_string="my-droplet-$(echo ${{ github.run_id }} | md5sum | cut -c1-8)"
+          echo "$unique_string"
+          echo "::set-output name=UNIQUE_STRING::$unique_string"
       - name: Use unique string
         run: |
           # Use the unique string generated in the previous step
-          echo "${{ steps.unique-string.outputs.self }}"
+          echo "${{ env.UNIQUE_STRING }}"
       - name: Create new droplet
         id: droplet
         run: |
-          doctl compute droplet create ${{ steps.unique-string.outputs.self }} \
+          doctl compute droplet create ${{ env.UNIQUE_STRING }} \
           --region nyc1 \
           --size s-1vcpu-1gb \
           --image ubuntu-18-04-x64 \
@@ -42,7 +45,7 @@ jobs:
         run: sleep 60
       - name: Get created droplet IPv4
         run: |
-          ipv4=$(doctl compute droplet get ${{ steps.unique-string.outputs.self }} --output json | jq -r '.Networks.V4[]?.IpAddress')
+          ipv4=$(doctl compute droplet get ${{ env.UNIQUE_STRING }} --output json | jq -r '.Networks.V4[]?.IpAddress')
           echo "::set-env name=DROPLET_IPV4::$ipv4"
       - name: Install Docker on droplet
         uses: appleboy/ssh-action@v0.0.2
